@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Image Integrity Analyzer</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap"
+          rel="stylesheet">
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+    <!-- ================= NAVBAR ================= -->
+
+    <nav class="navbar">
+
+        <div class="brand">
+            <span class="brand-mark">◈</span>
+            <span>IMAGE INTEGRITY</span>
+        </div>
+
+        <div class="nav-tag">
+            Deep Learning Analysis
+        </div>
+
+    </nav>
+
+
+    <!-- ================= MAIN ================= -->
+
+    <main>
+
+        <!-- ================= HERO ================= -->
+
+        <section class="hero">
+
+            <div class="hero-text">
+
+                <p class="eyebrow">
+                    IMAGE AUTHENTICITY ANALYZER
+                </p>
+
+                <h1>
+                    Is this image
+                    <span>authentic?</span>
+                </h1>
+
+                <p class="hero-description">
+                    Upload an image and let our deep-learning
+                    models analyze it for signs of manipulation
+                    or AI-generated content.
+                </p>
+
+            </div>
+
+
+            <!-- ================= UPLOAD ================= -->
+
+            <form method="POST"
+                  action="/"
+                  enctype="multipart/form-data"
+                  class="upload-card"
+                  id="uploadForm">
+
+                <div class="upload-icon">
+                    ↑
+                </div>
+
+                <h2>
+                    Analyze an image
+                </h2>
+
+                <p>
+                    JPG, JPEG or PNG · Maximum 10 MB
+                </p>
+
+                <label for="image"
+                       class="choose-button">
+                    Choose Image
+                </label>
+
+                <input type="file"
+                       id="image"
+                       name="image"
+                       accept=".jpg,.jpeg,.png"
+                       required
+                       hidden>
+
+                <p id="fileName"
+                   class="file-name">
+                </p>
+
+
+                <!-- IMAGE PREVIEW -->
+
+                <div id="previewContainer"
+                     class="preview-container">
+
+                    <img id="preview"
+                         src=""
+                         alt="Image preview">
+
+                </div>
+
+
+                <button type="submit"
+                        class="analyze-button"
+                        id="analyzeButton">
+
+                    Analyze Image
+
+                </button>
+
+            </form>
+
+        </section>
+
+
+        <!-- ================= ERROR ================= -->
+
+        {% if error %}
+
+        <section class="message-section">
+
+            <div class="error-box">
+                {{ error }}
+            </div>
+
+        </section>
+
+        {% endif %}
+
+
+        <!-- ================= RESULT ================= -->
+
+        {% if final_result %}
+
+        <section class="result-section">
+
+            <div class="result-header">
+
+                <p class="eyebrow">
+                    ANALYSIS COMPLETE
+                </p>
+
+                <h2>
+                    Detection Result
+                </h2>
+
+            </div>
+
+
+            <div class="result-layout">
+
+
+                <!-- UPLOADED IMAGE -->
+
+                <div class="uploaded-image-card">
+
+                    <div class="card-label">
+                        UPLOADED IMAGE
+                    </div>
+
+                    <img src="{{ url_for('uploaded_file', filename=image_file) }}"
+                         alt="Uploaded image">
+
+                    <p class="image-name">
+                        {{ image_file }}
+                    </p>
+
+                </div>
+
+
+                <!-- FINAL RESULT -->
+
+                <div class="result-card
+                    {% if final_result == 'REAL' %}
+                        result-real
+                    {% elif final_result == 'TAMPERED' %}
+                        result-tampered
+                    {% elif final_result == 'AI-GENERATED' %}
+                        result-ai
+                    {% endif %}
+                ">
+
+
+                    <div class="result-label">
+                        FINAL CLASSIFICATION
+                    </div>
+
+
+                    <!-- RESULT ICON -->
+
+                    <div class="result-icon">
+
+                        {% if final_result == "REAL" %}
+
+                            ✓
+
+                        {% elif final_result == "TAMPERED" %}
+
+                            !
+
+                        {% elif final_result == "AI-GENERATED" %}
+
+                            ✦
+
+                        {% endif %}
+
+                    </div>
+
+
+                    <!-- RESULT TITLE -->
+
+                    <h3 class="result-title">
+                        {{ final_result }}
+                    </h3>
+
+
+                    <!-- DIFFERENT COMMENT -->
+
+                    {% if result_comment %}
+
+                    <p class="result-comment">
+                        {{ result_comment }}
+                    </p>
+
+                    {% endif %}
+
+
+                    <!-- DIFFERENT EXPLANATION -->
+
+                    {% if result_detail %}
+
+                    <p class="result-detail">
+                        {{ result_detail }}
+                    </p>
+
+                    {% endif %}
+
+
+                    <!-- DETECTION SCORE -->
+
+                    {% if final_score is not none %}
+
+                    <div class="confidence">
+
+                        <div class="confidence-top">
+
+                            <span>
+                                Detection Score
+                            </span>
+
+                            <strong>
+                                {{ "%.1f"|format(final_score * 100) }}%
+                            </strong>
+
+                        </div>
+
+
+                        <!--
+                        No Jinja calculation inside style.
+                        This avoids the previous HTML error.
+                        -->
+
+                        <div class="confidence-bar">
+
+                            <div class="confidence-fill"></div>
+
+                        </div>
+
+                    </div>
+
+                    {% endif %}
+
+                </div>
+
+            </div>
+
+
+            <!-- ================= TECHNICAL ANALYSIS ================= -->
+
+            <div class="technical-card">
+
+                <div class="technical-heading">
+
+                    <p class="eyebrow">
+                        TECHNICAL ANALYSIS
+                    </p>
+
+                    <h3>
+                        Models Used
+                    </h3>
+
+                </div>
+
+
+                <div class="technical-grid">
+
+
+                    <!-- CASIA -->
+
+                    <div class="technical-item">
+
+                        <span class="technical-number">
+                            01
+                        </span>
+
+                        <div>
+
+                            <strong>
+                                CASIA + ELA
+                            </strong>
+
+                            <p>
+                                Detects signs of traditional
+                                image manipulation and tampering.
+                            </p>
+
+                            {% if casia_score is not none %}
+
+                            <small>
+                                Score:
+                                {{ "%.4f"|format(casia_score) }}
+                            </small>
+
+                            {% endif %}
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- CIFAKE -->
+
+                    <div class="technical-item">
+
+                        <span class="technical-number">
+                            02
+                        </span>
+
+                        <div>
+
+                            <strong>
+                                CIFAKE CNN
+                            </strong>
+
+                            <p>
+                                Detects patterns associated
+                                with AI-generated images.
+                            </p>
+
+                            {% if cifake_score is not none %}
+
+                            <small>
+                                Score:
+                                {{ "%.4f"|format(cifake_score) }}
+                            </small>
+
+                            {% endif %}
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+
+            <!-- ================= ANALYZE AGAIN ================= -->
+
+            <div class="again-container">
+
+                <a href="/"
+                   class="again-button">
+
+                    Analyze Another Image
+
+                </a>
+
+            </div>
+
+        </section>
+
+        {% endif %}
+
+
+        <!-- ================= HOW IT WORKS ================= -->
+
+        <section class="how-section">
+
+            <div class="section-heading">
+
+                <p class="eyebrow">
+                    THE PROCESS
+                </p>
+
+                <h2>
+                    How it works
+                </h2>
+
+                <p>
+                    Two deep-learning approaches analyze
+                    different types of image authenticity.
+                </p>
+
+            </div>
+
+
+            <div class="steps">
+
+
+                <div class="step">
+
+                    <span>
+                        01
+                    </span>
+
+                    <h3>
+                        Upload
+                    </h3>
+
+                    <p>
+                        Select an image from your device.
+                    </p>
+
+                </div>
+
+
+                <div class="step">
+
+                    <span>
+                        02
+                    </span>
+
+                    <h3>
+                        Preprocess
+                    </h3>
+
+                    <p>
+                        The image is prepared for the
+                        appropriate neural network.
+                    </p>
+
+                </div>
+
+
+                <div class="step">
+
+                    <span>
+                        03
+                    </span>
+
+                    <h3>
+                        Analyze
+                    </h3>
+
+                    <p>
+                        CASIA with ELA checks for tampering,
+                        while CIFAKE checks for AI generation.
+                    </p>
+
+                </div>
+
+
+                <div class="step">
+
+                    <span>
+                        04
+                    </span>
+
+                    <h3>
+                        Classify
+                    </h3>
+
+                    <p>
+                        The system provides one final
+                        classification.
+                    </p>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- ================= DISCLAIMER ================= -->
+
+        <section class="disclaimer">
+
+            <strong>
+                Important
+            </strong>
+
+            <p>
+                Results are model-based predictions and should
+                not be treated as definitive proof of image
+                authenticity. Performance may vary depending
+                on the image.
+            </p>
+
+        </section>
+
+    </main>
+
+
+    <!-- ================= FOOTER ================= -->
+
+    <footer>
+
+        <span>
+            Image Integrity Analyzer
+        </span>
+
+        <span>
+            Deep Learning · CNN · ELA
+        </span>
+
+    </footer>
+
+
+    <!-- ================= JAVASCRIPT ================= -->
+
+    <script>
+
+        const imageInput =
+            document.getElementById("image");
+
+        const preview =
+            document.getElementById("preview");
+
+        const previewContainer =
+            document.getElementById("previewContainer");
+
+        const fileName =
+            document.getElementById("fileName");
+
+        const uploadForm =
+            document.getElementById("uploadForm");
+
+        const analyzeButton =
+            document.getElementById("analyzeButton");
+
+
+        /* IMAGE PREVIEW */
+
+        imageInput.addEventListener(
+            "change",
+            function () {
+
+                const file = this.files[0];
+
+                if (!file) {
+
+                    previewContainer.style.display = "none";
+
+                    fileName.textContent = "";
+
+                    return;
+                }
+
+
+                fileName.textContent =
+                    file.name;
+
+
+                const reader =
+                    new FileReader();
+
+
+                reader.onload =
+                    function (event) {
+
+                        preview.src =
+                            event.target.result;
+
+                        previewContainer.style.display =
+                            "block";
+
+                    };
+
+
+                reader.readAsDataURL(file);
+
+            }
+        );
+
+
+        /* ANALYZING BUTTON */
+
+        uploadForm.addEventListener(
+            "submit",
+            function () {
+
+                analyzeButton.textContent =
+                    "Analyzing image...";
+
+                analyzeButton.disabled =
+                    true;
+
+            }
+        );
+
+    </script>
+
+</body>
+
+</html>

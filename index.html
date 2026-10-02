@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Image Forgery Detection System</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+    <div class="container">
+
+        <header>
+            <h1>Image Forgery & Synthesis Detection</h1>
+
+            <p>
+                A deep-learning-based system for detecting
+                traditional image tampering and AI-generated images.
+            </p>
+        </header>
+
+
+        <section class="upload-section">
+
+            <h2>Upload Image</h2>
+
+            <p>
+                Upload an image to analyze it using our Phase 1
+                detection models.
+            </p>
+
+            {% if error %}
+                <div class="error">
+                    {{ error }}
+                </div>
+            {% endif %}
+
+
+            <form method="POST" enctype="multipart/form-data">
+
+                <input
+                    type="file"
+                    name="image"
+                    accept=".jpg,.jpeg,.png"
+                    required
+                >
+
+                <button type="submit">
+                    Analyze Image
+                </button>
+
+            </form>
+
+        </section>
+
+
+        {% if image_file %}
+
+        <section class="results">
+
+            <h2>Detection Results</h2>
+
+
+            <div class="result-container">
+
+
+                <div class="result-card">
+
+                    <h3>CASIA + ELA</h3>
+
+                    <p>
+                        Traditional Image Tampering Detection
+                    </p>
+
+                    <div class="result">
+
+                        {% if casia_result == "TAMPERED" %}
+
+                            <span class="danger">
+                                {{ casia_result }}
+                            </span>
+
+                        {% else %}
+
+                            <span class="success">
+                                {{ casia_result }}
+                            </span>
+
+                        {% endif %}
+
+                    </div>
+
+                    <p>
+                        Model Score:
+                        <strong>
+                            {{ "%.4f"|format(casia_score) }}
+                        </strong>
+                    </p>
+
+                </div>
+
+
+
+                <div class="result-card">
+
+                    <h3>CIFAKE CNN</h3>
+
+                    <p>
+                        AI-Generated Image Detection
+                    </p>
+
+                    <div class="result">
+
+                        {% if cifake_result == "AI-GENERATED" %}
+
+                            <span class="danger">
+                                {{ cifake_result }}
+                            </span>
+
+                        {% else %}
+
+                            <span class="success">
+                                {{ cifake_result }}
+                            </span>
+
+                        {% endif %}
+
+                    </div>
+
+                    <p>
+                        Model Score:
+                        <strong>
+                            {{ "%.4f"|format(cifake_score) }}
+                        </strong>
+                    </p>
+
+                </div>
+
+            </div>
+
+
+            <div class="summary">
+
+                <h3>Analysis Summary</h3>
+
+                <p>
+                    <strong>CASIA + ELA:</strong>
+                    {{ casia_result }}
+                </p>
+
+                <p>
+                    <strong>CIFAKE CNN:</strong>
+                    {{ cifake_result }}
+                </p>
+
+            </div>
+
+        </section>
+
+        {% endif %}
+
+
+        <footer>
+
+            <p>
+                Phase 1 • Deep Learning Based Image Analysis
+            </p>
+
+            <p>
+                CASIA v2.0 + ELA | CIFAKE + CNN
+            </p>
+
+        </footer>
+
+    </div>
+
+</body>
+
+</html>
