@@ -1,5 +1,4 @@
-Flask
-tensorflow
+streamlit
+tensorflow-cpu
 numpy
-Pillow
-gunicorn
+pillow
