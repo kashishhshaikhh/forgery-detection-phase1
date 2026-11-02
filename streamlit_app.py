@@ -9,6 +9,7 @@ from PIL import Image
 
 from casia_predict import predict_casia
 from cifake_predict import predict_cifake
+from face_predict import predict_face
 
 # Scores between LOW and HIGH are treated as "not confident" (presentation choice,
 # not a validated forensic threshold).
@@ -61,12 +62,12 @@ div[data-testid="stVerticalBlockBorderWrapper"]{background:var(--cream);border:1
 .image-name{margin-top:12px;color:var(--muted);font-size:12px;word-break:break-all;}
 .result-card{border-radius:20px;padding:45px;min-height:470px;display:flex;flex-direction:column;justify-content:center;text-align:center;border:1px solid var(--border);}
 .result-real{background:var(--real-light);border-color:#B8D8C5;}
-.result-tampered,.result-ai{background:var(--berry-light);border-color:#D9B5C1;}
+.result-tampered,.result-ai,.result-deepfake{background:var(--berry-light);border-color:#D9B5C1;}
 .result-inconclusive{background:var(--cream-dark);}
 .result-label{font-size:10px;letter-spacing:2.5px;font-weight:700;color:var(--muted);margin-bottom:25px;}
 .result-icon{width:62px;height:62px;margin:0 auto 20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;color:#fff;background:var(--plum);}
 .result-real .result-icon{background:var(--real);}
-.result-tampered .result-icon,.result-ai .result-icon{background:var(--berry);}
+.result-tampered .result-icon,.result-ai .result-icon,.result-deepfake .result-icon{background:var(--berry);}
 .result-title{font-family:"Playfair Display",serif;font-size:48px;line-height:1;color:var(--plum-dark);margin-bottom:20px;}
 .result-comment{font-size:20px;font-weight:700;color:var(--text);margin-bottom:12px;}
 .result-detail{max-width:600px;margin:0 auto 6px;font-size:14px;line-height:1.7;color:var(--muted);}
@@ -77,7 +78,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]{background:var(--cream);border:1
 .confidence-fill{height:100%;background:var(--plum-bright);border-radius:20px;}
 .technical-card{margin-top:25px;background:var(--cream);border:1px solid var(--border);border-radius:20px;padding:35px;box-shadow:var(--shadow);}
 .technical-card h3{font-family:"Playfair Display",serif;font-size:28px;color:var(--plum-dark);margin-bottom:25px;}
-.technical-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+.technical-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;}
 .technical-item{display:flex;gap:18px;padding:20px;background:var(--cream-dark);border-radius:14px;}
 .technical-number{font-size:12px;font-weight:700;color:var(--plum-bright);padding-top:3px;}
 .technical-item strong{color:var(--plum-dark);font-size:15px;}
@@ -85,7 +86,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]{background:var(--cream);border:1
 .technical-item small{display:block;margin-top:10px;font-size:11px;color:var(--plum-bright);font-weight:700;}
 .how-section{padding:70px 0 60px;border-top:1px solid rgba(59,16,51,.12);margin-top:50px;}
 .how-section h2{font-family:"Playfair Display",serif;font-size:44px;color:var(--plum-dark);margin-bottom:12px;}
-.how-intro{color:var(--muted);line-height:1.7;font-size:15px;margin-bottom:40px;max-width:600px;}
+.how-intro{color:var(--muted);line-height:1.7;font-size:15px;margin-bottom:40px;max-width:640px;}
 .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;}
 .step{padding:25px;background:rgba(251,247,240,.55);border:1px solid var(--border);border-radius:16px;}
 .step>span{color:var(--plum-bright);font-size:12px;font-weight:700;letter-spacing:1px;}
@@ -111,11 +112,12 @@ div[data-testid="stVerticalBlockBorderWrapper"]{border-top:4px solid var(--plum-
 .result-section{animation:rise .6s ease both;}
 @keyframes rise{from{opacity:0;transform:translateY(24px);}to{opacity:1;transform:none;}}
 .result-real{box-shadow:0 25px 60px rgba(47,118,85,.22);}
-.result-tampered,.result-ai{box-shadow:0 25px 60px rgba(139,41,74,.22);}
+.result-tampered,.result-ai,.result-deepfake{box-shadow:0 25px 60px rgba(139,41,74,.22);}
 .result-title{font-size:56px !important;}
 .technical-item{transition:.25s;}
 .technical-item:hover{transform:translateY(-3px);}
-@media(max-width:900px){.result-layout,.technical-grid{grid-template-columns:1fr;}.steps{grid-template-columns:1fr 1fr;}}
+@media(max-width:1000px){.technical-grid{grid-template-columns:1fr;}}
+@media(max-width:900px){.result-layout{grid-template-columns:1fr;}.steps{grid-template-columns:1fr 1fr;}}
 @media(max-width:600px){.steps{grid-template-columns:1fr;}.nav-tag{display:none;}.result-card{padding:30px 20px;}.result-title{font-size:40px;}.site-footer{flex-direction:column;gap:8px;}}
 """
 
@@ -135,16 +137,19 @@ COMMENTS = {
                  "This can happen when regions are pasted, copied or removed."),
     "AI-GENERATED": ("Looks AI-generated",
                      "The CIFAKE detector found visual patterns it associates with synthetic images."),
+    "DEEPFAKE": ("Face looks manipulated",
+                 "The FaceForensics detector found signs of face swapping or facial manipulation "
+                 "in the face region of this image."),
     "REAL": ("No strong warning signs",
              "The deciding detector did not flag this image. Treat this as a model opinion, "
              "not a guarantee of authenticity."),
     "INCONCLUSIVE": ("Not enough confidence",
-                     "Both detectors landed near the middle, so a reliable verdict is not possible. "
+                     "The detectors landed near the middle, so a reliable verdict is not possible. "
                      "Try an original, uncompressed JPEG if you have one."),
 }
-ICONS = {"REAL": "✓", "TAMPERED": "!", "AI-GENERATED": "✦", "INCONCLUSIVE": "?"}
-CLASSES = {"REAL": "result-real", "TAMPERED": "result-tampered",
-           "AI-GENERATED": "result-ai", "INCONCLUSIVE": "result-inconclusive"}
+ICONS = {"REAL": "✓", "TAMPERED": "!", "AI-GENERATED": "✦", "DEEPFAKE": "◉", "INCONCLUSIVE": "?"}
+CLASSES = {"REAL": "result-real", "TAMPERED": "result-tampered", "AI-GENERATED": "result-ai",
+           "DEEPFAKE": "result-deepfake", "INCONCLUSIVE": "result-inconclusive"}
 
 
 def casia_label(score):
@@ -161,13 +166,24 @@ def cifake_label(score):
     return "AI-GENERATED" if score <= LOW else "INCONCLUSIVE"
 
 
-def decide(casia_score, cifake_score):
-    """A detector that flags something (TAMPERED / AI-GENERATED) outranks a REAL.
-    Within each group, the detector further from 0.5 (more confident) decides."""
+def face_label(score):
+    # FaceForensics: high score = DEEPFAKE. score is None when no face was found.
+    if score is None:
+        return "NO FACE"
+    if score >= HIGH:
+        return "DEEPFAKE"
+    return "REAL" if score <= LOW else "INCONCLUSIVE"
+
+
+def decide(casia_score, cifake_score, face_score):
+    """A detector that flags something (TAMPERED / AI-GENERATED / DEEPFAKE) outranks a REAL.
+    Within each group, the detector further from 0.5 (more confident) decides.
+    Detectors that are inconclusive or found no face are ignored."""
     options = []
     for name, label, score in (("CASIA + ELA", casia_label(casia_score), casia_score),
-                               ("CIFAKE CNN", cifake_label(cifake_score), cifake_score)):
-        if label != "INCONCLUSIVE":
+                               ("CIFAKE CNN", cifake_label(cifake_score), cifake_score),
+                               ("FaceForensics Xception", face_label(face_score), face_score)):
+        if label not in ("INCONCLUSIVE", "NO FACE"):
             options.append((label != "REAL", abs(score - 0.5), name, label, score))
     if not options:
         return "INCONCLUSIVE", None, None
@@ -183,16 +199,22 @@ def to_data_uri(file_bytes):
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
-def result_html(file_name, data_uri, casia_score, cifake_score):
-    verdict, decided_by, confidence = decide(casia_score, cifake_score)
+def result_html(file_name, data_uri, casia_score, cifake_score, face_score):
+    verdict, decided_by, confidence = decide(casia_score, cifake_score, face_score)
     comment, detail = COMMENTS[verdict]
     by = (f"Decided by: {decided_by}" if decided_by
-          else "Neither detector was confident enough to decide.")
+          else "None of the detectors was confident enough to decide.")
+    face_note = ""
+    if face_score is None:
+        face_note = ('<p class="result-detail">No face was found, so the deepfake detector '
+                     'did not take part in this result.</p>')
     bar = ""
     if confidence is not None:
         bar = (f'<div class="confidence"><div class="confidence-top"><span>Model confidence</span>'
                f'<strong>{confidence * 100:.1f}%</strong></div><div class="confidence-bar">'
                f'<div class="confidence-fill" style="width:{confidence * 100:.1f}%"></div></div></div>')
+    face_score_text = ("No face found" if face_score is None
+                       else f"Score: {face_score:.4f} · {face_label(face_score)}")
     return squash(f"""
     <section class="result-section">
       <p class="eyebrow">ANALYSIS COMPLETE</p>
@@ -210,6 +232,7 @@ def result_html(file_name, data_uri, casia_score, cifake_score):
           <p class="result-comment">{comment}</p>
           <p class="result-detail">{detail}</p>
           <p class="result-detail">{by}</p>
+          {face_note}
           {bar}
         </div>
       </div>
@@ -225,6 +248,10 @@ def result_html(file_name, data_uri, casia_score, cifake_score):
             <strong>CIFAKE CNN</strong>
             <p>Looks for visual patterns commonly found in AI-generated images.</p>
             <small>Score: {cifake_score:.4f} · {cifake_label(cifake_score)}</small></div></div>
+          <div class="technical-item"><span class="technical-number">03</span><div>
+            <strong>FaceForensics Xception</strong>
+            <p>Detects the largest face and checks it for deepfake and face-swap artifacts.</p>
+            <small>{face_score_text}</small></div></div>
         </div>
       </div>
     </section>
@@ -241,9 +268,9 @@ left, right = st.columns([1.05, 0.95], gap="large")
 
 with left:
     st.markdown(squash("""
-    <div class="hero-text"><span class="pill">● TWO DEEP-LEARNING DETECTORS</span><p class="eyebrow">IMAGE AUTHENTICITY ANALYZER</p>
+    <div class="hero-text"><span class="pill">● THREE DEEP-LEARNING DETECTORS</span><p class="eyebrow">IMAGE AUTHENTICITY ANALYZER</p>
     <h1>Is this image <span>authentic?</span></h1>
-    <p class="hero-description">Drop in any photo and two deep-learning detectors will inspect it. One hunts for signs of editing, the other for AI-generated content.</p><div class="chips"><span class="chip">◈ CASIA + ELA</span><span class="chip">✦ CIFAKE CNN</span><span class="chip">⚡ Results in seconds</span></div></div>
+    <p class="hero-description">Drop in any photo and three deep-learning detectors will inspect it. One hunts for signs of editing, one for AI-generated content, and one for deepfaked faces.</p><div class="chips"><span class="chip">◈ CASIA + ELA</span><span class="chip">✦ CIFAKE CNN</span><span class="chip">◉ FaceForensics</span><span class="chip">⚡ Results in seconds</span></div></div>
     """), unsafe_allow_html=True)
 
 with right:
@@ -273,8 +300,10 @@ if analyze:
             with st.spinner("Analyzing image..."):
                 _, casia_score = predict_casia(path)
                 _, cifake_score = predict_cifake(path)
+                _, face_score = predict_face(path)  # score is None if no face is found
             st.markdown(result_html(uploaded.name, to_data_uri(uploaded.getvalue()),
-                                    casia_score, cifake_score), unsafe_allow_html=True)
+                                    casia_score, cifake_score, face_score),
+                        unsafe_allow_html=True)
         except Exception as e:
             st.markdown(f'<div class="error-box">Error while analyzing image: {html.escape(str(e))}</div>',
                         unsafe_allow_html=True)
@@ -284,14 +313,14 @@ if analyze:
 st.markdown(squash("""
 <section class="how-section">
   <p class="eyebrow">THE PROCESS</p><h2>How it works</h2>
-  <p class="how-intro">Two detectors, two different questions: was this image edited, and was it created by AI?</p>
+  <p class="how-intro">Three detectors, three different questions: was this image edited, was it created by AI, and is the face in it a deepfake?</p>
   <div class="steps">
     <div class="step"><span>01</span><h3>Upload</h3><p>Choose a JPG or PNG from your device.</p></div>
-    <div class="step"><span>02</span><h3>Preprocess</h3><p>ELA highlights compression differences for one model, and the image is resized for the other.</p></div>
-    <div class="step"><span>03</span><h3>Analyze</h3><p>CASIA + ELA looks for edits. CIFAKE looks for AI-generated patterns.</p></div>
-    <div class="step"><span>04</span><h3>Classify</h3><p>You get one clear verdict from the more confident detector, with both scores shown.</p></div>
+    <div class="step"><span>02</span><h3>Preprocess</h3><p>ELA highlights compression differences, the image is resized for the CNN, and the largest face is cropped for the deepfake model.</p></div>
+    <div class="step"><span>03</span><h3>Analyze</h3><p>CASIA + ELA looks for edits, CIFAKE looks for AI-generated patterns, and FaceForensics looks for deepfaked faces.</p></div>
+    <div class="step"><span>04</span><h3>Classify</h3><p>You get one clear verdict from the most confident detector, with all scores shown.</p></div>
   </div>
 </section>
-<section class="disclaimer"><strong>Please note</strong><p>These results are model predictions, not proof. Accuracy depends on the image: heavily compressed, resized or screenshotted pictures are harder to judge. Use the scores as one signal alongside your own judgment.</p></section>
-<div class="site-footer"><span>Image Integrity Analyzer</span><span>Deep Learning · CNN · ELA</span></div>
+<section class="disclaimer"><strong>Please note</strong><p>These results are model predictions, not proof. Accuracy depends on the image: heavily compressed, resized or screenshotted pictures are harder to judge. The deepfake detector only runs when a clear, mostly frontal face is found. Use the scores as one signal alongside your own judgment.</p></section>
+<div class="site-footer"><span>Image Integrity Analyzer</span><span>Deep Learning · CNN · ELA · Xception</span></div>
 """), unsafe_allow_html=True)
