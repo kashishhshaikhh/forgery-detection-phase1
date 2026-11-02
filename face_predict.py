@@ -19,7 +19,7 @@ META_PATH = os.path.join(MODEL_DIR, "ff_meta.json")
 def download_file(file_id, output_path):
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-```
+
 if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
     return
 
@@ -33,13 +33,13 @@ result = gdown.download(
 
 if result is None or not os.path.exists(output_path):
     raise RuntimeError("Google Drive download failed. Check file permissions.")
-```
+
 
 @lru_cache(maxsize=1)
 def _load():
 from tensorflow import keras
 
-```
+
 download_file(MODEL_ID, MODEL_PATH)
 download_file(META_ID, META_PATH)
 
@@ -55,12 +55,12 @@ cascade = cv2.CascadeClassifier(
 )
 
 return model, threshold, cascade
-```
+
 
 def predict_face(path):
 model, threshold, cascade = _load()
 
-```
+
 img = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
 rgb = np.array(img)
 
@@ -105,6 +105,6 @@ else:
 label = "DEEPFAKE" if score >= 0.5 else "REAL"
 
 return label, score
-```
+
 
 
