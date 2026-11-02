@@ -16,6 +16,13 @@ MODEL_DIR = os.path.join("/tmp", "forgery_models")
 MODEL_PATH = os.path.join(MODEL_DIR, "ff_xception_final.keras")
 META_PATH = os.path.join(MODEL_DIR, "ff_meta.json")
 
+# Face detection settings: strict first, then looser. Each is tried at several rotations.
+DETECT_SETTINGS = [
+    dict(scaleFactor=1.1, minNeighbors=5, minSize=(60, 60)),
+    dict(scaleFactor=1.05, minNeighbors=3, minSize=(40, 40)),
+]
+ANGLES = [0, -15, 15, -30, 30, -45, 45]
+
 
 def download_file(file_id, output_path):
     os.makedirs(MODEL_DIR, exist_ok=True)
@@ -56,6 +63,32 @@ def _load():
     return model, threshold, cascade
 
 
+def _rotate(rgb, angle):
+    """Rotate the image by angle degrees, enlarging the canvas so nothing is cut off."""
+    if angle == 0:
+        return rgb
+    h, w = rgb.shape[:2]
+    m = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
+    cos, sin = abs(m[0, 0]), abs(m[0, 1])
+    new_w, new_h = int(h * sin + w * cos), int(h * cos + w * sin)
+    m[0, 2] += new_w / 2 - w / 2
+    m[1, 2] += new_h / 2 - h / 2
+    return cv2.warpAffine(rgb, m, (new_w, new_h))
+
+
+def _find_face(rgb, cascade):
+    """Try strict then loose settings, at several rotations.
+    Returns (image_used, (x, y, w, h)) or (None, None)."""
+    for settings in DETECT_SETTINGS:
+        for angle in ANGLES:
+            rotated = _rotate(rgb, angle)
+            gray = cv2.cvtColor(rotated, cv2.COLOR_RGB2GRAY)
+            faces = cascade.detectMultiScale(gray, **settings)
+            if len(faces) > 0:
+                return rotated, max(faces, key=lambda f: f[2] * f[3])
+    return None, None
+
+
 def predict_face(path):
     """Returns (label, score). score: high = DEEPFAKE, 0.5 = the trained cutoff.
     Returns (None, None) if no face is found."""
@@ -63,20 +96,12 @@ def predict_face(path):
 
     img = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
     rgb = np.array(img)
-    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
 
-    faces = cascade.detectMultiScale(
-        gray,
-        scaleFactor=1.1,
-        minNeighbors=5,
-        minSize=(60, 60),
-    )
-
-    if len(faces) == 0:
+    rgb, box = _find_face(rgb, cascade)
+    if box is None:
         return None, None
 
-    x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
-
+    x, y, w, h = box
     margin = int(0.2 * max(w, h))
     x1 = max(x - margin, 0)
     y1 = max(y - margin, 0)
@@ -99,5 +124,5 @@ def predict_face(path):
 
     label = "DEEPFAKE" if score >= 0.5 else "REAL"
     return label, score
-    
+       
 
