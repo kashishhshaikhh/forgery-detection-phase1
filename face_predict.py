@@ -32,7 +32,9 @@ result = gdown.download(
 )
 
 if result is None or not os.path.exists(output_path):
-    raise RuntimeError("Google Drive download failed. Check file permissions.")
+    raise RuntimeError(
+        "Google Drive download failed. Check file permissions."
+    )
 
 
 @lru_cache(maxsize=1)
@@ -61,10 +63,16 @@ def predict_face(path):
 model, threshold, cascade = _load()
 
 
-img = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
+img = ImageOps.exif_transpose(
+    Image.open(path)
+).convert("RGB")
+
 rgb = np.array(img)
 
-gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+gray = cv2.cvtColor(
+    rgb,
+    cv2.COLOR_RGB2GRAY
+)
 
 faces = cascade.detectMultiScale(
     gray,
@@ -76,7 +84,10 @@ faces = cascade.detectMultiScale(
 if len(faces) == 0:
     return None, None
 
-x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+x, y, w, h = max(
+    faces,
+    key=lambda f: f[2] * f[3]
+)
 
 margin = int(0.2 * max(w, h))
 
@@ -91,7 +102,10 @@ crop = cv2.resize(
 )
 
 prediction = model.predict(
-    np.expand_dims(crop.astype("float32") / 255.0, axis=0),
+    np.expand_dims(
+        crop.astype("float32") / 255.0,
+        axis=0
+    ),
     verbose=0
 )[0][0]
 
@@ -107,4 +121,4 @@ label = "DEEPFAKE" if score >= 0.5 else "REAL"
 return label, score
 
 
-
+   
