@@ -10,6 +10,7 @@ from PIL import Image
 from casia_predict import predict_casia
 from cifake_predict import predict_cifake
 from face_predict import predict_face
+from router import route_image
 
 # Scores between LOW and HIGH are treated as "not confident" (presentation choice,
 # not a validated forensic threshold).
@@ -154,8 +155,6 @@ CLASSES = {"REAL": "result-real", "TAMPERED": "result-tampered", "AI-GENERATED":
 
 def casia_label(score):
     # CASIA: high score = TAMPERED
-    if score is None:
-        return "NOT USED"
     if score >= HIGH:
         return "TAMPERED"
     return "REAL" if score <= LOW else "INCONCLUSIVE"
@@ -163,8 +162,6 @@ def casia_label(score):
 
 def cifake_label(score):
     # CIFAKE (project convention): high score = REAL, low score = AI-GENERATED
-    if score is None:
-        return "NOT USED"
     if score >= HIGH:
         return "REAL"
     return "AI-GENERATED" if score <= LOW else "INCONCLUSIVE"
@@ -187,7 +184,7 @@ def decide(casia_score, cifake_score, face_score):
     for name, label, score in (("CASIA + ELA", casia_label(casia_score), casia_score),
                                ("CIFAKE CNN", cifake_label(cifake_score), cifake_score),
                                ("FaceForensics Xception", face_label(face_score), face_score)):
-        if label not in ("INCONCLUSIVE", "NO FACE", "NOT USED"):
+        if label not in ("INCONCLUSIVE", "NO FACE"):
             options.append((label != "REAL", abs(score - 0.5), name, label, score))
     if not options:
         return "INCONCLUSIVE", None, None
@@ -203,28 +200,33 @@ def to_data_uri(file_bytes):
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
-def result_html(file_name, data_uri, casia_score, cifake_score, face_score):
+def result_html(file_name, data_uri, casia_score, cifake_score, face_score,
+                route="UNSURE", route_label="", route_conf=0.0):
     verdict, decided_by, confidence = decide(casia_score, cifake_score, face_score)
     comment, detail = COMMENTS[verdict]
     by = (f"Decided by: {decided_by}" if decided_by
           else "None of the detectors was confident enough to decide.")
-    if face_score is None:
+    face_note = ""
+    if route == "OBJECT":
+        face_note = ('<p class="result-detail">The content classifier saw an object, animal or '
+                     'scene, so the deepfake detector was skipped.</p>')
+    elif face_score is None:
         face_note = ('<p class="result-detail">No face was found, so the deepfake detector '
-                     'was not used. CASIA + ELA and CIFAKE decided this result.</p>')
-    else:
-        face_note = ('<p class="result-detail">A face was found, so only the deepfake '
-                     'detector was used for this image.</p>')
-    casia_text = ("Not used (face photo)" if casia_score is None
-                  else f"Score: {casia_score:.4f} · {casia_label(casia_score)}")
-    cifake_text = ("Not used (face photo)" if cifake_score is None
-                   else f"Score: {cifake_score:.4f} · {cifake_label(cifake_score)}")
+                     'did not take part in this result.</p>')
+    sent_to = "CASIA + CIFAKE" if route == "OBJECT" else "all three detectors"
+    route_note = (f'<p class="result-detail">Content check: {html.escape(route_label)} '
+                  f'({route_conf * 100:.0f}% sure) · sent to {sent_to}.</p>')
     bar = ""
     if confidence is not None:
         bar = (f'<div class="confidence"><div class="confidence-top"><span>Model confidence</span>'
                f'<strong>{confidence * 100:.1f}%</strong></div><div class="confidence-bar">'
                f'<div class="confidence-fill" style="width:{confidence * 100:.1f}%"></div></div></div>')
-    face_score_text = ("No face found" if face_score is None
-                       else f"Score: {face_score:.4f} · {face_label(face_score)}")
+    if route == "OBJECT":
+        face_score_text = "Skipped (not a face photo)"
+    elif face_score is None:
+        face_score_text = "No face found"
+    else:
+        face_score_text = f"Score: {face_score:.4f} · {face_label(face_score)}"
     return squash(f"""
     <section class="result-section">
       <p class="eyebrow">ANALYSIS COMPLETE</p>
@@ -242,6 +244,7 @@ def result_html(file_name, data_uri, casia_score, cifake_score, face_score):
           <p class="result-comment">{comment}</p>
           <p class="result-detail">{detail}</p>
           <p class="result-detail">{by}</p>
+          {route_note}
           {face_note}
           {bar}
         </div>
@@ -253,11 +256,11 @@ def result_html(file_name, data_uri, casia_score, cifake_score, face_score):
           <div class="technical-item"><span class="technical-number">01</span><div>
             <strong>CASIA + ELA</strong>
             <p>Looks for traditional editing such as splicing, copy-move and object removal.</p>
-            <small>{casia_text}</small></div></div>
+            <small>Score: {casia_score:.4f} · {casia_label(casia_score)}</small></div></div>
           <div class="technical-item"><span class="technical-number">02</span><div>
             <strong>CIFAKE CNN</strong>
             <p>Looks for visual patterns commonly found in AI-generated images.</p>
-            <small>{cifake_text}</small></div></div>
+            <small>Score: {cifake_score:.4f} · {cifake_label(cifake_score)}</small></div></div>
           <div class="technical-item"><span class="technical-number">03</span><div>
             <strong>FaceForensics Xception</strong>
             <p>Detects the largest face and checks it for deepfake and face-swap artifacts.</p>
@@ -308,16 +311,17 @@ if analyze:
             path = tmp.name
         try:
             with st.spinner("Analyzing image..."):
-                # Route by content: photos with a face go ONLY to the deepfake model,
-                # everything else (objects, animals, scenes) goes ONLY to CASIA + CIFAKE.
-                _, face_score = predict_face(path)  # score is None if no face is found
-                if face_score is not None:
-                    casia_score = cifake_score = None
-                else:
-                    _, casia_score = predict_casia(path)
-                    _, cifake_score = predict_cifake(path)
+                # Content classifier decides who sees the image:
+                #   OBJECT -> CASIA + CIFAKE;  UNSURE -> all three (nothing is skipped).
+                route, route_label, route_conf = route_image(path)
+                _, casia_score = predict_casia(path)
+                _, cifake_score = predict_cifake(path)
+                face_score = None
+                if route != "OBJECT":
+                    _, face_score = predict_face(path)  # None if no face is found
             st.markdown(result_html(uploaded.name, to_data_uri(uploaded.getvalue()),
-                                    casia_score, cifake_score, face_score),
+                                    casia_score, cifake_score, face_score,
+                                    route, route_label, route_conf),
                         unsafe_allow_html=True)
         except Exception as e:
             st.markdown(f'<div class="error-box">Error while analyzing image: {html.escape(str(e))}</div>',
@@ -328,11 +332,11 @@ if analyze:
 st.markdown(squash("""
 <section class="how-section">
   <p class="eyebrow">THE PROCESS</p><h2>How it works</h2>
-  <p class="how-intro">Three detectors, three different questions: was this image edited, was it created by AI, and is the face in it a deepfake? Photos with a face go to the deepfake detector; everything else goes to the other two.</p>
+  <p class="how-intro">Three detectors, three different questions: was this image edited, was it created by AI, and is the face in it a deepfake? A content classifier first checks what the image shows and decides which detectors should see it.</p>
   <div class="steps">
     <div class="step"><span>01</span><h3>Upload</h3><p>Choose a JPG or PNG from your device.</p></div>
-    <div class="step"><span>02</span><h3>Preprocess</h3><p>ELA highlights compression differences, the image is resized for the CNN, and the largest face is cropped for the deepfake model.</p></div>
-    <div class="step"><span>03</span><h3>Analyze</h3><p>If a face is found, only FaceForensics checks it. Otherwise CASIA + ELA looks for edits and CIFAKE looks for AI-generated patterns.</p></div>
+    <div class="step"><span>02</span><h3>Preprocess</h3><p>A content classifier labels the image. ELA highlights compression differences, the image is resized for the CNN, and the largest face is cropped for the deepfake model.</p></div>
+    <div class="step"><span>03</span><h3>Analyze</h3><p>Objects, animals and scenes go to CASIA + CIFAKE. Anything else, or anything the classifier is unsure about, goes to all three detectors.</p></div>
     <div class="step"><span>04</span><h3>Classify</h3><p>You get one clear verdict from the most confident detector, with all scores shown.</p></div>
   </div>
 </section>
