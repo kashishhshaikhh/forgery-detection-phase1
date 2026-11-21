@@ -1,5 +1,6 @@
 import json
 import os
+import urllib.request
 from functools import lru_cache
 
 import cv2
@@ -16,22 +17,26 @@ MODEL_DIR = os.path.join("/tmp", "forgery_models")
 MODEL_PATH = os.path.join(MODEL_DIR, "ff_xception_final.keras")
 META_PATH = os.path.join(MODEL_DIR, "ff_meta.json")
 
-# ---------------------------------------------------------------- face detection settings
-# One strict setting only. The old loose setting (minNeighbors=3) caused false positives
-# on objects like fruit.
-DETECT_SETTINGS = [
-    dict(scaleFactor=1.1, minNeighbors=6, minSize=(60, 60)),
-]
-ANGLES = [0, -15, 15, -30, 30]
+# YuNet face detector (small ONNX file, downloaded once)
+YUNET_URL = ("https://github.com/opencv/opencv_zoo/raw/main/models/"
+             "face_detection_yunet/face_detection_yunet_2023mar.onnx")
+YUNET_PATH = os.path.join(MODEL_DIR, "face_detection_yunet_2023mar.onnx")
 
-# A face must be at least this fraction of the image's shorter side.
-MIN_FACE_FRACTION = 0.08
+# A detection must have at least this confidence to count as a face.
+# Raise (e.g. 0.95) if non-faces still get through; lower (e.g. 0.85) if real faces are missed.
+FACE_CONFIDENCE = 0.90
 
-# Require two eyes inside the face box. Set to False if real faces start getting missed.
-REQUIRE_EYES = True
+# Face must be at least this fraction of the image's shorter side.
+MIN_FACE_FRACTION = 0.05
 
-# Set to True to print what the detector found (shows up in the terminal / logs).
-DEBUG = False
+# Also try slightly tilted versions of the image (helps with tilted selfies).
+ANGLES = [0, -30, 30]
+
+# Longest image side used for detection/cropping (keeps it fast).
+MAX_SIDE = 1280
+
+# Prints detections in the Streamlit logs. Set to False once everything works.
+DEBUG = True
 
 
 def download_file(file_id, output_path):
@@ -52,12 +57,21 @@ def download_file(file_id, output_path):
         raise RuntimeError("Google Drive download failed. Check file permissions.")
 
 
+def download_yunet():
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    if os.path.exists(YUNET_PATH) and os.path.getsize(YUNET_PATH) > 0:
+        return
+    print("Downloading: YuNet face detector")
+    urllib.request.urlretrieve(YUNET_URL, YUNET_PATH)
+
+
 @lru_cache(maxsize=1)
 def _load():
     from tensorflow import keras
 
     download_file(MODEL_ID, MODEL_PATH)
     download_file(META_ID, META_PATH)
+    download_yunet()
 
     model = keras.models.load_model(MODEL_PATH)
 
@@ -66,14 +80,14 @@ def _load():
 
     threshold = float(metadata["threshold"])
 
-    face_cascade = cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    )
-    eye_cascade = cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_eye.xml"
+    detector = cv2.FaceDetectorYN.create(
+        YUNET_PATH, "", (320, 320),
+        score_threshold=FACE_CONFIDENCE,
+        nms_threshold=0.3,
+        top_k=50,
     )
 
-    return model, threshold, face_cascade, eye_cascade
+    return model, threshold, detector
 
 
 def _rotate(rgb, angle):
@@ -89,61 +103,47 @@ def _rotate(rgb, angle):
     return cv2.warpAffine(rgb, m, (new_w, new_h))
 
 
-def _looks_like_face(gray, box, eye_cascade):
-    """Extra checks to reject false positives (fruit, round objects, textures)."""
-    x, y, w, h = box
-    img_h, img_w = gray.shape[:2]
+def _find_face(rgb, detector):
+    """Returns (image_used, (x, y, w, h)) or (None, None) when no confident face is found."""
+    for angle in ANGLES:
+        rotated = _rotate(rgb, angle)
+        h, w = rotated.shape[:2]
+        bgr = cv2.cvtColor(rotated, cv2.COLOR_RGB2BGR)
 
-    # 1) Face must be a reasonable size compared to the image.
-    if min(w, h) < MIN_FACE_FRACTION * min(img_h, img_w):
-        return False
+        detector.setInputSize((w, h))
+        _, faces = detector.detect(bgr)
 
-    if not REQUIRE_EYES:
-        return True
+        if DEBUG:
+            print("angle", angle, "->", None if faces is None else faces[:, [0, 1, 2, 3, -1]].round(2).tolist())
 
-    # 2) Two eyes must be found in the upper part of the face box.
-    roi = gray[y:y + int(0.6 * h), x:x + w]
-    min_eye = max(w // 12, 10)
-    eyes = eye_cascade.detectMultiScale(
-        roi, scaleFactor=1.1, minNeighbors=5, minSize=(min_eye, min_eye)
-    )
-    if len(eyes) < 2:
-        return False
+        if faces is None:
+            continue
 
-    # The two eyes must be clearly apart horizontally (not one eye detected twice).
-    centers = sorted(ex + ew / 2 for ex, ey, ew, eh in eyes)
-    return (centers[-1] - centers[0]) >= 0.25 * w
-
-
-def _find_face(rgb, face_cascade, eye_cascade):
-    """Returns (image_used, (x, y, w, h)) or (None, None) when no real face is found."""
-    for settings in DETECT_SETTINGS:
-        for angle in ANGLES:
-            rotated = _rotate(rgb, angle)
-            gray = cv2.cvtColor(rotated, cv2.COLOR_RGB2GRAY)
-            faces = cface = face_cascade.detectMultiScale(gray, **settings)
-
+        # columns: x, y, w, h, 10 landmark values, score
+        good = [f for f in faces
+                if f[-1] >= FACE_CONFIDENCE
+                and min(f[2], f[3]) >= MIN_FACE_FRACTION * min(h, w)]
+        if good:
+            best = max(good, key=lambda f: f[2] * f[3])
+            x, y, bw, bh = [int(v) for v in best[:4]]
+            x, y = max(x, 0), max(y, 0)
             if DEBUG:
-                print("candidates:", settings, "angle", angle, "->", list(cface))
+                print("FACE ACCEPTED:", (x, y, bw, bh), "score", float(best[-1]), "angle", angle)
+            return rotated, (x, y, bw, bh)
 
-            # Try the biggest candidates first.
-            for f in sorted(faces, key=lambda f: f[2] * f[3], reverse=True):
-                if _looks_like_face(gray, f, eye_cascade):
-                    if DEBUG:
-                        print("FACE ACCEPTED:", f, "angle", angle)
-                    return rotated, f
     return None, None
 
 
 def predict_face(path):
     """Returns (label, score). score: high = DEEPFAKE, 0.5 = the trained cutoff.
     Returns (None, None) if no face is found."""
-    model, threshold, face_cascade, eye_cascade = _load()
+    model, threshold, detector = _load()
 
     img = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
+    img.thumbnail((MAX_SIDE, MAX_SIDE))
     rgb = np.array(img)
 
-    rgb, box = _find_face(rgb, face_cascade, eye_cascade)
+    rgb, box = _find_face(rgb, detector)
     if box is None:
         return None, None
 
