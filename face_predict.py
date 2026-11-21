@@ -16,12 +16,22 @@ MODEL_DIR = os.path.join("/tmp", "forgery_models")
 MODEL_PATH = os.path.join(MODEL_DIR, "ff_xception_final.keras")
 META_PATH = os.path.join(MODEL_DIR, "ff_meta.json")
 
-# Face detection settings: strict first, then looser. Each is tried at several rotations.
+# ---------------------------------------------------------------- face detection settings
+# One strict setting only. The old loose setting (minNeighbors=3) caused false positives
+# on objects like fruit.
 DETECT_SETTINGS = [
-    dict(scaleFactor=1.1, minNeighbors=5, minSize=(60, 60)),
-    dict(scaleFactor=1.05, minNeighbors=3, minSize=(40, 40)),
+    dict(scaleFactor=1.1, minNeighbors=6, minSize=(60, 60)),
 ]
-ANGLES = [0, -15, 15, -30, 30, -45, 45]
+ANGLES = [0, -15, 15, -30, 30]
+
+# A face must be at least this fraction of the image's shorter side.
+MIN_FACE_FRACTION = 0.08
+
+# Require two eyes inside the face box. Set to False if real faces start getting missed.
+REQUIRE_EYES = True
+
+# Set to True to print what the detector found (shows up in the terminal / logs).
+DEBUG = False
 
 
 def download_file(file_id, output_path):
@@ -56,11 +66,14 @@ def _load():
 
     threshold = float(metadata["threshold"])
 
-    cascade = cv2.CascadeClassifier(
+    face_cascade = cv2.CascadeClassifier(
         cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
     )
+    eye_cascade = cv2.CascadeClassifier(
+        cv2.data.haarcascades + "haarcascade_eye.xml"
+    )
 
-    return model, threshold, cascade
+    return model, threshold, face_cascade, eye_cascade
 
 
 def _rotate(rgb, angle):
@@ -76,28 +89,61 @@ def _rotate(rgb, angle):
     return cv2.warpAffine(rgb, m, (new_w, new_h))
 
 
-def _find_face(rgb, cascade):
-    """Try strict then loose settings, at several rotations.
-    Returns (image_used, (x, y, w, h)) or (None, None)."""
+def _looks_like_face(gray, box, eye_cascade):
+    """Extra checks to reject false positives (fruit, round objects, textures)."""
+    x, y, w, h = box
+    img_h, img_w = gray.shape[:2]
+
+    # 1) Face must be a reasonable size compared to the image.
+    if min(w, h) < MIN_FACE_FRACTION * min(img_h, img_w):
+        return False
+
+    if not REQUIRE_EYES:
+        return True
+
+    # 2) Two eyes must be found in the upper part of the face box.
+    roi = gray[y:y + int(0.6 * h), x:x + w]
+    min_eye = max(w // 12, 10)
+    eyes = eye_cascade.detectMultiScale(
+        roi, scaleFactor=1.1, minNeighbors=5, minSize=(min_eye, min_eye)
+    )
+    if len(eyes) < 2:
+        return False
+
+    # The two eyes must be clearly apart horizontally (not one eye detected twice).
+    centers = sorted(ex + ew / 2 for ex, ey, ew, eh in eyes)
+    return (centers[-1] - centers[0]) >= 0.25 * w
+
+
+def _find_face(rgb, face_cascade, eye_cascade):
+    """Returns (image_used, (x, y, w, h)) or (None, None) when no real face is found."""
     for settings in DETECT_SETTINGS:
         for angle in ANGLES:
             rotated = _rotate(rgb, angle)
             gray = cv2.cvtColor(rotated, cv2.COLOR_RGB2GRAY)
-            faces = cascade.detectMultiScale(gray, **settings)
-            if len(faces) > 0:
-                return rotated, max(faces, key=lambda f: f[2] * f[3])
+            faces = cface = face_cascade.detectMultiScale(gray, **settings)
+
+            if DEBUG:
+                print("candidates:", settings, "angle", angle, "->", list(cface))
+
+            # Try the biggest candidates first.
+            for f in sorted(faces, key=lambda f: f[2] * f[3], reverse=True):
+                if _looks_like_face(gray, f, eye_cascade):
+                    if DEBUG:
+                        print("FACE ACCEPTED:", f, "angle", angle)
+                    return rotated, f
     return None, None
 
 
 def predict_face(path):
     """Returns (label, score). score: high = DEEPFAKE, 0.5 = the trained cutoff.
     Returns (None, None) if no face is found."""
-    model, threshold, cascade = _load()
+    model, threshold, face_cascade, eye_cascade = _load()
 
     img = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
     rgb = np.array(img)
 
-    rgb, box = _find_face(rgb, cascade)
+    rgb, box = _find_face(rgb, face_cascade, eye_cascade)
     if box is None:
         return None, None
 
